@@ -552,7 +552,7 @@ function ensureCategoryAdminUI(){
         </form>
       </div>
       <div id="categoriesAdminList" class="admin-panel admin-list-panel"></div>`;
-    $('#dashboard').appendChild(panel);
+    $('.admin-main').appendChild(panel);
     $('#categoryForm').addEventListener('submit',saveCategory);
   }
 }
@@ -860,7 +860,7 @@ function ensureHeroAdminUI(){
       <label class="hero-active-label"><input id="heroActive" type="checkbox" checked> إظهار الشريحة</label>
       <div class="hero-admin-actions"><button class="btn gold" type="submit">حفظ الشريحة</button><button class="btn ghost" type="button" id="cancelHeroEdit">إلغاء</button></div>
     </form></div>`;
-    $('#dashboard').appendChild(panel);
+    $('.admin-main').appendChild(panel);
     $('#addHeroSlide').onclick=()=>openHeroEditor();
     $('#cancelHeroEdit').onclick=()=>$('#heroSlideEditor').classList.add('hidden');
     $('#heroSlideForm').onsubmit=saveHeroSlide;
