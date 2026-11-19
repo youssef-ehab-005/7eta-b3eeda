@@ -830,6 +830,9 @@ renderProducts();
 renderCart();
 loadProducts();
 
+// Load Firestore categories for the public storefront as well as the admin panel.
+loadCategories();
+
 // PDF Product Import
 // Extraction runs in the browser; nothing is uploaded to a third-party service.
 
