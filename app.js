@@ -2,6 +2,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import { getFirestore, collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js';
 import { firebaseConfig, defaultWhatsAppNumber } from './firebase-config.js';
 
 // Remove ChatGPT tracking parameter from URL
@@ -35,7 +36,7 @@ const demoProducts = [
 const $ = s => document.querySelector(s);
 const money = n => `${Number(n||0).toLocaleString('en-US')} EGP`;
 
-let app, auth, db, connected=false, currentUser=null;
+let app, auth, db, storage, connected=false, currentUser=null;
 let products=[...demoProducts];
 let cart=JSON.parse(localStorage.getItem('zetaCart')||'[]');
 let orders=[];
@@ -46,6 +47,16 @@ let categories=[
   {id:'snack',key:'snack',name:'سناكس',emoji:'🍟'},
   {id:'market',key:'market',name:'ماركت',emoji:'🛒'}
 ];
+let heroSlides=[];
+let activeHeroIndex=0;
+let heroTimer=null;
+let heroTouchStartX=0;
+let heroSlidesInitialized=false;
+const defaultHeroSlides=[
+  {title:'خلي يومك حتة بعيدة',eyebrow:'YOUR DAILY MOOD, SERVED FRESH',description:'قهوة مظبوطة، مشروبات منعشة، وسناكس تحلي يومك. كل اللي بتحبه في مكان واحد.',buttonText:'اكتشف المنيو',buttonLink:'#menu',badgeText:'SIGNATURE ICED MOCHA',order:1,active:true},
+  {title:'انتعاش على مزاجك',eyebrow:'FRESH DRINKS, GOOD VIBES',description:'اختار مشروبك المفضل واستمتع بطعم منعش معمول مخصوص ليك.',buttonText:'شوف المشروبات',buttonLink:'#menu',badgeText:'FRESH & DELICIOUS',order:2,active:true},
+  {title:'كل احتياجاتك في مكان واحد',eyebrow:'MORE THAN A CAFÉ',description:'اختار من منتجات الماركت واطلبها بسهولة مع مشروبك المفضل.',buttonText:'تسوق الماركت',buttonLink:'#market',badgeText:'YOUR NEIGHBORHOOD MARKET',order:3,active:true}
+];
 let whatsappNumber=localStorage.getItem('zetaWhatsapp')||defaultWhatsAppNumber;
 
 try {
@@ -53,6 +64,7 @@ try {
     app=initializeApp(firebaseConfig);
     auth=getAuth(app);
     db=getFirestore(app);
+    storage=getStorage(app);
     connected=true;
 
     onAuthStateChanged(auth,u=>{
@@ -320,6 +332,8 @@ function showDashboard(){
   $('#dashboard').classList.remove('hidden');
 
   ensureCategoryAdminUI();
+  ensureHeroAdminUI();
+  initializeHeroSlidesIfNeeded();
   loadAdminData();
   loadCategories();
   $('#whatsappSetting').value=whatsappNumber;
@@ -691,6 +705,258 @@ async function removeCategory(key){
   }
 }
 
+
+// Hero slider: Firestore content + Firebase Storage image uploads
+async function loadHeroSlides(){
+  if(!connected){ heroSlides=defaultHeroSlides.map((x,i)=>({...x,id:'default-'+i})); renderHeroSlider(); return; }
+  try{
+    const metaSnap=await getDoc(doc(db,'heroSlidesMeta','state'));
+    heroSlidesInitialized=metaSnap.exists() && metaSnap.data().initialized===true;
+    const snap=await getDocs(collection(db,'heroSlides'));
+    if(!snap.empty){
+      heroSlides=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order||0)-(b.order||0));
+    }else{
+      heroSlides=heroSlidesInitialized?[]:defaultHeroSlides.map((x,i)=>({...x,id:'default-'+i}));
+    }
+  }catch(error){
+    console.error('Hero slides load:',error);
+    heroSlides=defaultHeroSlides.map((x,i)=>({...x,id:'default-'+i}));
+  }
+  renderHeroSlider();
+}
+
+function renderHeroSlider(){
+  const hero=$('.hero');
+  if(!hero)return;
+  const copy=hero.querySelector('.hero-copy');
+  const title=copy?.querySelector('h1');
+  const eyebrow=copy?.querySelector('.eyebrow');
+  const desc=copy?.querySelector('.hero-desc');
+  const button=copy?.querySelector('.hero-buttons .btn.gold');
+  const badge=hero.querySelector('.floating-tag');
+  const art=hero.querySelector('.hero-art');
+  let active=heroSlides.filter(x=>x.active!==false);
+  if(!active.length){
+    if(title)title.innerHTML='أهلاً بيك<br><em>في 7eta b3eeda</em>';
+    if(eyebrow)eyebrow.textContent='YOUR DAILY MOOD';
+    if(desc)desc.textContent='تابعنا قريبًا لاكتشاف الجديد.';
+    if(button)button.classList.add('hidden');
+    if(hero.querySelector('.hero-bottom'))hero.querySelector('.hero-bottom').classList.add('hidden');
+    return;
+  }
+  if(button)button.classList.remove('hidden');
+  if(hero.querySelector('.hero-bottom'))hero.querySelector('.hero-bottom').classList.remove('hidden');
+  activeHeroIndex=Math.min(activeHeroIndex,active.length-1);
+  const slide=active[activeHeroIndex];
+  if(title)title.textContent=slide.title||'7eta b3eeda';
+  if(eyebrow)eyebrow.textContent=slide.eyebrow||'YOUR DAILY MOOD';
+  if(desc)desc.textContent=slide.description||'';
+  if(button){button.innerHTML=`${escapeHtml(slide.buttonText||'اكتشف المنيو')} <span>←</span>`;button.href=slide.buttonLink||'#menu';}
+  if(badge){const bits=String(slide.badgeText||'').split(' ');badge.innerHTML=`${escapeHtml(bits.slice(0,-1).join(' '))}<br><b>${escapeHtml(bits.slice(-1).join(''))}</b>`;}
+  let image=art.querySelector('.hero-slide-image');
+  if(slide.imageUrl){
+    if(!image){image=document.createElement('img');image.className='hero-slide-image';image.alt=slide.title||'Hero slide';art.appendChild(image);}
+    image.src=slide.imageUrl;
+    image.classList.remove('hidden');
+    ['.orbit','.drink-scene','.floating-tag','.hero-stamp'].forEach(sel=>{const el=art.querySelector(sel);if(el)el.classList.add('hero-art-muted');});
+  }else{
+    if(image)image.classList.add('hidden');
+    ['.orbit','.drink-scene','.floating-tag','.hero-stamp'].forEach(sel=>{const el=art.querySelector(sel);if(el)el.classList.remove('hero-art-muted');});
+  }
+  const count=active.length;
+  const counter=hero.querySelector('.hero-bottom > span:first-child');
+  if(counter)counter.textContent=`${String(activeHeroIndex+1).padStart(2,'0')} / ${String(count).padStart(2,'0')}`;
+  const lines=hero.querySelector('.hero-lines');
+  if(lines)lines.innerHTML=active.map((_,i)=>`<button type="button" class="hero-dot ${i===activeHeroIndex?'active':''}" data-hero-dot="${i}" aria-label="الشريحة ${i+1}"></button>`).join('');
+  lines?.querySelectorAll('[data-hero-dot]').forEach(b=>b.onclick=()=>goHeroSlide(Number(b.dataset.heroDot)));
+}
+
+function goHeroSlide(index){
+  const active=heroSlides.filter(x=>x.active!==false);
+  if(!active.length)return;
+  activeHeroIndex=(index+active.length)%active.length;
+  renderHeroSlider();
+  restartHeroTimer();
+}
+function restartHeroTimer(){
+  if(heroTimer)clearInterval(heroTimer);
+  if(heroSlides.filter(x=>x.active!==false).length>1){
+    heroTimer=setInterval(()=>{goHeroSlide(activeHeroIndex+1);},5000);
+  }
+}
+function setupHeroControls(){
+  const hero=$('.hero');
+  if(!hero||hero.dataset.controlsReady)return;
+  hero.dataset.controlsReady='1';
+  const prev=document.createElement('button'),next=document.createElement('button');
+  prev.className='hero-arrow hero-prev';prev.type='button';prev.setAttribute('aria-label','الشريحة السابقة');prev.textContent='‹';
+  next.className='hero-arrow hero-next';next.type='button';next.setAttribute('aria-label','الشريحة التالية');next.textContent='›';
+  hero.append(prev,next);
+  prev.onclick=()=>goHeroSlide(activeHeroIndex-1);
+  next.onclick=()=>goHeroSlide(activeHeroIndex+1);
+  hero.addEventListener('mouseenter',()=>{if(heroTimer)clearInterval(heroTimer);});
+  hero.addEventListener('mouseleave',restartHeroTimer);
+  hero.addEventListener('touchstart',e=>{heroTouchStartX=e.changedTouches[0].screenX;},{passive:true});
+  hero.addEventListener('touchend',e=>{
+    const dx=e.changedTouches[0].screenX-heroTouchStartX;
+    if(Math.abs(dx)>45)goHeroSlide(activeHeroIndex+(dx<0?1:-1));
+  },{passive:true});
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowLeft')goHeroSlide(activeHeroIndex+1);
+    if(e.key==='ArrowRight')goHeroSlide(activeHeroIndex-1);
+  });
+}
+
+
+async function initializeHeroSlidesIfNeeded(){
+  if(!connected||!currentUser)return;
+  try{
+    const meta=await getDoc(doc(db,'heroSlidesMeta','state'));
+    if(meta.exists()&&meta.data().initialized===true){heroSlidesInitialized=true;return;}
+    const snap=await getDocs(collection(db,'heroSlides'));
+    if(snap.empty){
+      for(const slide of defaultHeroSlides){
+        await addDoc(collection(db,'heroSlides'),{...slide,createdAt:serverTimestamp()});
+      }
+    }
+    await setDoc(doc(db,'heroSlidesMeta','state'),{initialized:true,updatedAt:serverTimestamp()});
+    heroSlidesInitialized=true;
+    await loadHeroSlides();
+  }catch(error){console.error('Hero initialization:',error);}
+}
+
+function ensureHeroAdminUI(){
+  if(!$('#heroSlidesTabButton')){
+    const button=document.createElement('button');
+    button.className='side-tab';button.dataset.tab='hero-slides';button.id='heroSlidesTabButton';button.textContent='🖼️ السلايدر الرئيسي';
+    const side=document.querySelector('.admin-side');
+    side?.insertBefore(button,$('#logoutBtn'));
+    button.onclick=()=>{
+      document.querySelectorAll('.side-tab').forEach(x=>x.classList.remove('active'));
+      button.classList.add('active');
+      document.querySelectorAll('.admin-tab').forEach(x=>x.classList.add('hidden'));
+      $('#heroSlidesAdminPanel').classList.remove('hidden');
+      renderHeroAdmin();
+    };
+  }
+  if(!$('#heroSlidesAdminPanel')){
+    const panel=document.createElement('section');
+    panel.id='heroSlidesAdminPanel';panel.className='admin-tab hidden';
+    panel.innerHTML=`<div class="panel-title"><h3>إدارة السلايدر الرئيسي</h3><button class="btn gold" id="addHeroSlide">+ إضافة شريحة</button></div>
+    <div class="admin-panel"><p class="muted">تقدر تعدّل العنوان والوصف والصورة والزر، وترفع الصورة من جهازك مباشرة إلى Firebase Storage.</p><div id="heroSlidesAdminList"></div></div>
+    <div class="admin-panel hero-edit-panel hidden" id="heroSlideEditor"><h3 id="heroEditorTitle">إضافة شريحة</h3>
+    <form id="heroSlideForm" class="hero-admin-form">
+      <input type="hidden" id="heroSlideId">
+      <label>العنوان<input id="heroTitle" required maxlength="90"></label>
+      <label>النص الصغير<input id="heroEyebrow" maxlength="70"></label>
+      <label>الوصف<textarea id="heroDescription" rows="3" maxlength="240"></textarea></label>
+      <label>صورة الشريحة<input id="heroImageFile" type="file" accept="image/*"><small class="muted">يفضل صورة أفقية، وحجم أقل من 2MB.</small></label>
+      <img id="heroImagePreview" class="hero-admin-preview hidden" alt="معاينة صورة الشريحة">
+      <label>نص الشارة الجانبية<input id="heroBadge" maxlength="60"></label>
+      <label>نص الزر<input id="heroButtonText" maxlength="35"></label>
+      <label>رابط الزر<input id="heroButtonLink" placeholder="#menu"></label>
+      <label>ترتيب الشريحة<input id="heroOrder" type="number" min="1" value="1"></label>
+      <label class="hero-active-label"><input id="heroActive" type="checkbox" checked> إظهار الشريحة</label>
+      <div class="hero-admin-actions"><button class="btn gold" type="submit">حفظ الشريحة</button><button class="btn ghost" type="button" id="cancelHeroEdit">إلغاء</button></div>
+    </form></div>`;
+    $('#dashboard').appendChild(panel);
+    $('#addHeroSlide').onclick=()=>openHeroEditor();
+    $('#cancelHeroEdit').onclick=()=>$('#heroSlideEditor').classList.add('hidden');
+    $('#heroSlideForm').onsubmit=saveHeroSlide;
+  }
+}
+
+function renderHeroAdmin(){
+  const host=$('#heroSlidesAdminList');if(!host)return;
+  host.innerHTML=heroSlides.map(slide=>`<div class="hero-admin-row">
+    <div>${slide.imageUrl?`<img src="${escapeHtml(slide.imageUrl)}" alt="">`:'<span class="hero-admin-placeholder">🖼️</span>'}
+    <div><b>${escapeHtml(slide.title||'شريحة بدون عنوان')}</b><small>الترتيب: ${slide.order||1} · ${slide.active===false?'مخفية':'ظاهرة'}</small></div></div>
+    <div class="hero-admin-actions"><button type="button" data-edit-hero="${escapeHtml(slide.id)}">تعديل</button><button type="button" data-delete-hero="${escapeHtml(slide.id)}">حذف</button></div></div>`).join('')||'<p class="muted">لا توجد شرائح. اضغط إضافة شريحة لإنشاء واحدة.</p>';
+  host.querySelectorAll('[data-edit-hero]').forEach(b=>b.onclick=()=>openHeroEditor(b.dataset.editHero));
+  host.querySelectorAll('[data-delete-hero]').forEach(b=>b.onclick=()=>removeHeroSlide(b.dataset.deleteHero));
+}
+
+function openHeroEditor(id=''){
+  const slide=heroSlides.find(x=>x.id===id);
+  $('#heroSlideEditor').classList.remove('hidden');
+  $('#heroSlideForm').reset();
+  $('#heroSlideId').value=slide?.id||'';
+  $('#heroEditorTitle').textContent=slide?'تعديل الشريحة':'إضافة شريحة';
+  $('#heroTitle').value=slide?.title||'';
+  $('#heroEyebrow').value=slide?.eyebrow||'';
+  $('#heroDescription').value=slide?.description||'';
+  $('#heroBadge').value=slide?.badgeText||'';
+  $('#heroButtonText').value=slide?.buttonText||'اكتشف المنيو';
+  $('#heroButtonLink').value=slide?.buttonLink||'#menu';
+  $('#heroOrder').value=slide?.order||heroSlides.length+1;
+  $('#heroActive').checked=slide?.active!==false;
+  const preview=$('#heroImagePreview');
+  if(slide?.imageUrl){preview.src=slide.imageUrl;preview.classList.remove('hidden');}
+  else{preview.removeAttribute('src');preview.classList.add('hidden');}
+  $('#heroSlideEditor').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+async function saveHeroSlide(event){
+  event.preventDefault();
+  if(!connected||!currentUser){toast('سجّل الدخول إلى Firebase أولاً');return;}
+  const id=$('#heroSlideId').value;
+  const old=heroSlides.find(x=>x.id===id);
+  const file=$('#heroImageFile').files?.[0];
+  let imageUrl=old?.imageUrl||'';
+  let imagePath=old?.imagePath||'';
+  try{
+    if(file){
+      if(!file.type.startsWith('image/')){toast('اختار ملف صورة صالح');return;}
+      if(file.size>2*1024*1024){toast('حجم الصورة أكبر من 2MB');return;}
+      const path=`heroSlides/${id||'new-'+Date.now()}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+      const fileRef=storageRef(storage,path);
+      await uploadBytes(fileRef,file,{contentType:file.type});
+      imageUrl=await getDownloadURL(fileRef);imagePath=path;
+    }
+    const data={
+      title:$('#heroTitle').value.trim(),
+      eyebrow:$('#heroEyebrow').value.trim(),
+      description:$('#heroDescription').value.trim(),
+      imageUrl,imagePath,
+      badgeText:$('#heroBadge').value.trim(),
+      buttonText:$('#heroButtonText').value.trim(),
+      buttonLink:$('#heroButtonLink').value.trim()||'#menu',
+      order:Number($('#heroOrder').value)||1,
+      active:$('#heroActive').checked,
+      updatedAt:serverTimestamp()
+    };
+    let savedId=id;
+    if(id)await updateDoc(doc(db,'heroSlides',id),data);
+    else{const ref=await addDoc(collection(db,'heroSlides'),{...data,createdAt:serverTimestamp()});savedId=ref.id;data.id=savedId;}
+    if(old?.imagePath&&file&&old.imagePath!==imagePath){try{await deleteObject(storageRef(storage,old.imagePath));}catch(e){console.warn('Old hero image cleanup:',e);}}
+    if(!heroSlidesInitialized){
+      await setDoc(doc(db,'heroSlidesMeta','state'),{initialized:true,updatedAt:serverTimestamp()});
+      heroSlidesInitialized=true;
+    }
+    await loadHeroSlides();renderHeroAdmin();
+    $('#heroSlideEditor').classList.add('hidden');
+    toast('تم حفظ الشريحة ورفع الصورة');
+  }catch(error){
+    console.error(error);toast('تعذر حفظ الشريحة. راجع Firestore وStorage Rules.');
+  }
+}
+
+async function removeHeroSlide(id){
+  const slide=heroSlides.find(x=>x.id===id);if(!slide)return;
+  if(!confirm('هل تريد حذف هذه الشريحة نهائيًا؟'))return;
+  try{
+    if(connected){
+      await deleteDoc(doc(db,'heroSlides',id));
+      if(slide.imagePath){try{await deleteObject(storageRef(storage,slide.imagePath));}catch(e){console.warn('Storage image delete:',e);}}
+      await setDoc(doc(db,'heroSlidesMeta','state'),{initialized:true,updatedAt:serverTimestamp()});
+      heroSlidesInitialized=true;
+    }
+    heroSlides=heroSlides.filter(x=>x.id!==id);
+    activeHeroIndex=0;renderHeroSlider();renderHeroAdmin();restartHeroTimer();
+    toast('تم حذف الشريحة');
+  }catch(error){console.error(error);toast('تعذر حذف الشريحة. راجع الصلاحيات.');}
+}
+
 // Products Admin
 function renderAdminProducts(){
   $('#adminProducts').innerHTML=products.map(p=>`
@@ -828,6 +1094,9 @@ $('#saveSettings').onclick=()=>{
 
 renderProducts();
 renderCart();
+setupHeroControls();
+loadHeroSlides();
+restartHeroTimer();
 loadProducts();
 
 // Load Firestore categories for the public storefront as well as the admin panel.
