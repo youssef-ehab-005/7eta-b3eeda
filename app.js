@@ -554,36 +554,55 @@ function renderCategoryControls(){
     ).join('');
     if(categories.some(c=>c.key===selected))select.value=selected;
   }
-  // Add filter chips for any newly created storefront categories.
-  const filterButtons=[...document.querySelectorAll('.filter')];
-  const filterHost=filterButtons[0]?.parentElement;
-  if(filterHost){
-    filterHost.querySelectorAll('[data-dynamic-category-filter]').forEach(el=>el.remove());
-    categories.filter(c=>c.key!=='market').forEach(c=>{
-      if(filterButtons.some(b=>b.dataset.filter===c.key))return;
-      const button=document.createElement('button');
-      button.type='button';
-      button.className='filter';
-      button.dataset.filter=c.key;
-      button.dataset.dynamicCategoryFilter='true';
-      button.textContent=`${c.emoji||'📦'} ${c.name}`;
-      button.addEventListener('click',()=>{
-        filterHost.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));
-        button.classList.add('active');
-        renderProducts(c.key);
+
+  // Build the main category strip from Firestore categories.
+  const strip=document.querySelector('.category-strip');
+  if(strip){
+    strip.innerHTML=categories.map(c=>`
+      <a href="${c.key==='market'?'#market':'#menu'}"
+         class="category" data-strip-category="${escapeHtml(c.key)}">
+        <span>${escapeHtml(c.emoji||'📦')}</span>
+        <b>${escapeHtml(c.name)}</b>
+      </a>`).join('');
+    strip.querySelectorAll('[data-strip-category]').forEach(link=>{
+      link.addEventListener('click',()=>{
+        const key=link.dataset.stripCategory;
+        if(key!=='market'){
+          document.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));
+          const filter=document.querySelector(`.filter[data-filter="${CSS.escape(key)}"]`);
+          if(filter)filter.classList.add('active');
+          renderProducts(key);
+        }
       });
-      filterHost.appendChild(button);
     });
   }
 
-  const pdfSelects=document.querySelectorAll('.pdf-preview-category');
-  pdfSelects.forEach(select=>{
-    const selected=select.value;
-    select.innerHTML=categories.map(c=>
-      `<option value="${escapeHtml(c.key)}">${escapeHtml(c.name)}</option>`
+  // Build the product filters from the same category list.
+  const filterHost=$('#filters');
+  if(filterHost){
+    filterHost.innerHTML=
+      `<button type="button" class="filter active" data-filter="all">الكل</button>`+
+      categories.filter(c=>c.key!=='market').map(c=>
+        `<button type="button" class="filter" data-filter="${escapeHtml(c.key)}">${escapeHtml(c.emoji||'📦')} ${escapeHtml(c.name)}</button>`
+      ).join('');
+    filterHost.querySelectorAll('.filter').forEach(button=>{
+      button.addEventListener('click',()=>{
+        filterHost.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));
+        button.classList.add('active');
+        renderProducts(button.dataset.filter);
+      });
+    });
+  }
+
+  // Keep the PDF import category selector in sync.
+  document.querySelectorAll('.pdf-preview-category').forEach(pdfSelect=>{
+    const selected=pdfSelect.value;
+    pdfSelect.innerHTML=categories.map(c=>
+      `<option value="${escapeHtml(c.key)}">${escapeHtml(c.emoji||'📦')} ${escapeHtml(c.name)}</option>`
     ).join('');
-    if(categories.some(c=>c.key===selected))select.value=selected;
+    if(categories.some(c=>c.key===selected))pdfSelect.value=selected;
   });
+
   renderCategoriesAdmin();
 }
 
