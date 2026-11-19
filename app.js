@@ -39,6 +39,13 @@ let app, auth, db, connected=false, currentUser=null;
 let products=[...demoProducts];
 let cart=JSON.parse(localStorage.getItem('zetaCart')||'[]');
 let orders=[];
+let categories=[
+  {id:'cold',key:'cold',name:'مشروبات باردة',emoji:'🥤'},
+  {id:'hot',key:'hot',name:'مشروبات ساخنة',emoji:'☕'},
+  {id:'juice',key:'juice',name:'عصائر',emoji:'🥭'},
+  {id:'snack',key:'snack',name:'سناكس',emoji:'🍟'},
+  {id:'market',key:'market',name:'ماركت',emoji:'🛒'}
+];
 let whatsappNumber=localStorage.getItem('zetaWhatsapp')||defaultWhatsAppNumber;
 
 try {
@@ -312,7 +319,9 @@ function showDashboard(){
   $('#adminLogin').classList.add('hidden');
   $('#dashboard').classList.remove('hidden');
 
+  ensureCategoryAdminUI();
   loadAdminData();
+  loadCategories();
   $('#whatsappSetting').value=whatsappNumber;
 }
 
@@ -395,6 +404,7 @@ async function loadAdminData(){
   $('#recentOrders').innerHTML=orders.slice(0,5)
     .map(orderHtml).join('')
     ||'<p class="muted">لا توجد طلبات بعد.</p>';
+  attachOrderActions($('#recentOrders'));
 }
 
 function orderHtml(o){
@@ -402,36 +412,264 @@ function orderHtml(o){
     <div>
       <b>${escapeHtml(o.customerName||'عميل')}</b>
       <small>${escapeHtml(o.phone||'')} · ${money(o.total)}</small>
+      <small>${escapeHtml(o.address||'')}</small>
     </div>
-    <select data-status="${o.id}">
+    <select data-status="${escapeHtml(o.id)}">
       <option value="new" ${o.status==='new'?'selected':''}>جديد</option>
       <option value="preparing" ${o.status==='preparing'?'selected':''}>قيد التجهيز</option>
       <option value="done" ${o.status==='done'?'selected':''}>مكتمل</option>
       <option value="cancelled" ${o.status==='cancelled'?'selected':''}>ملغي</option>
     </select>
+    <button type="button" data-delete-order="${escapeHtml(o.id)}">🗑️ حذف</button>
   </div>`;
+}
+
+function attachOrderActions(root=document){
+  root.querySelectorAll('[data-status]').forEach(select=>{
+    select.onchange=async()=>{
+      const id=select.dataset.status;
+      const old=orders.find(x=>x.id===id);
+      if(!old)return;
+      const previous=old.status;
+      old.status=select.value;
+      try{
+        if(connected) await updateDoc(doc(db,'orders',id),{status:select.value});
+        else localStorage.setItem('zetaOrders',JSON.stringify(orders));
+        toast('تم تحديث حالة الطلب');
+      }catch(error){
+        old.status=previous;
+        select.value=previous;
+        console.error(error);
+        toast('تعذر تحديث حالة الطلب');
+      }
+    };
+  });
+
+  root.querySelectorAll('[data-delete-order]').forEach(button=>{
+    button.onclick=()=>deleteOrder(button.dataset.deleteOrder);
+  });
+}
+
+async function deleteOrder(id){
+  if(!confirm('هل أنت متأكد من حذف هذا الطلب نهائياً؟'))return;
+  try{
+    if(connected) await deleteDoc(doc(db,'orders',id));
+    orders=orders.filter(order=>order.id!==id);
+    if(!connected) localStorage.setItem('zetaOrders',JSON.stringify(orders));
+    renderOrders();
+    $('#recentOrders').innerHTML=orders.slice(0,5).map(orderHtml).join('')
+      ||'<p class="muted">لا توجد طلبات بعد.</p>';
+    $('#statOrders').textContent=orders.length;
+    $('#statSales').textContent=money(orders.reduce((sum,o)=>sum+Number(o.total||0),0));
+    toast('تم حذف الطلب');
+  }catch(error){
+    console.error(error);
+    toast('تعذر حذف الطلب. راجع صلاحيات Firebase.');
+  }
 }
 
 function renderOrders(){
   $('#allOrders').innerHTML=orders.map(orderHtml).join('')
     ||'<p class="muted">لا توجد طلبات حتى الآن.</p>';
+  attachOrderActions($('#allOrders'));
+}
 
-  document.querySelectorAll('[data-status]').forEach(s=>{
-    s.onchange=async()=>{
-      const o=orders.find(x=>x.id===s.dataset.status);
-      if(o)o.status=s.value;
 
-      if(connected){
-        await updateDoc(doc(db,'orders',s.dataset.status),{
-          status:s.value
+// Dynamic category management (the tab and panel are created by JavaScript)
+function categorySlug(value){
+  return String(value||'').trim().toLowerCase()
+    .replace(/[^\w\u0600-\u06FF]+/g,'-').replace(/^-|-$/g,'');
+}
+
+async function loadCategories(){
+  if(!connected){ renderCategoryControls(); return; }
+  try{
+    const snap=await getDocs(collection(db,'categories'));
+    if(!snap.empty){
+      categories=snap.docs.map(d=>({id:d.id,...d.data()}));
+    }else{
+      // Keep the existing category keys working and seed the initial list once.
+      for(const item of categories){
+        await setDoc(doc(db,'categories',item.key),{
+          key:item.key,name:item.name,emoji:item.emoji,createdAt:serverTimestamp()
         });
-      }else{
-        localStorage.setItem('zetaOrders',JSON.stringify(orders));
       }
+    }
+  }catch(error){
+    console.error('Categories:',error);
+    toast('تعذر تحميل الأقسام. راجع صلاحيات categories في Firestore.');
+  }
+  renderCategoryControls();
+}
 
-      toast('تم تحديث حالة الطلب');
-    };
+function ensureCategoryAdminUI(){
+  if(!$('#categoriesTabButton')){
+    const reference=document.querySelector('.side-tab');
+    if(reference){
+      const button=document.createElement('button');
+      button.className='side-tab';
+      button.dataset.tab='categories';
+      button.id='categoriesTabButton';
+      button.textContent='📂 الأقسام';
+      reference.parentElement.appendChild(button);
+      button.addEventListener('click',()=>{
+        document.querySelectorAll('.side-tab').forEach(x=>x.classList.remove('active'));
+        button.classList.add('active');
+        document.querySelectorAll('.admin-tab').forEach(x=>x.classList.add('hidden'));
+        $('#categoriesAdminPanel').classList.remove('hidden');
+        renderCategoriesAdmin();
+      });
+    }
+  }
+
+  if(!$('#categoriesAdminPanel')){
+    const panel=document.createElement('section');
+    panel.id='categoriesAdminPanel';
+    panel.className='admin-tab hidden';
+    panel.innerHTML=`
+      <div class="panel-title"><h3>إدارة الأقسام</h3></div>
+      <div class="admin-panel" style="padding:16px;margin-bottom:16px">
+        <form id="categoryForm" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+          <label style="flex:1;min-width:160px">اسم القسم
+            <input id="categoryName" required maxlength="40" placeholder="مثال: حلويات">
+          </label>
+          <label style="width:110px">رمز تعبيري
+            <input id="categoryEmoji" maxlength="4" value="📦">
+          </label>
+          <button class="btn gold" type="submit">إضافة قسم</button>
+        </form>
+      </div>
+      <div id="categoriesAdminList" class="admin-panel"></div>`;
+    $('#dashboard').appendChild(panel);
+    $('#categoryForm').addEventListener('submit',saveCategory);
+  }
+}
+
+function renderCategoryControls(){
+  const select=$('#productCategory');
+  if(select){
+    const selected=select.value;
+    select.innerHTML=categories.map(c=>
+      `<option value="${escapeHtml(c.key)}">${escapeHtml(c.emoji||'📦')} ${escapeHtml(c.name)}</option>`
+    ).join('');
+    if(categories.some(c=>c.key===selected))select.value=selected;
+  }
+  // Add filter chips for any newly created storefront categories.
+  const filterButtons=[...document.querySelectorAll('.filter')];
+  const filterHost=filterButtons[0]?.parentElement;
+  if(filterHost){
+    filterHost.querySelectorAll('[data-dynamic-category-filter]').forEach(el=>el.remove());
+    categories.filter(c=>c.key!=='market').forEach(c=>{
+      if(filterButtons.some(b=>b.dataset.filter===c.key))return;
+      const button=document.createElement('button');
+      button.type='button';
+      button.className='filter';
+      button.dataset.filter=c.key;
+      button.dataset.dynamicCategoryFilter='true';
+      button.textContent=`${c.emoji||'📦'} ${c.name}`;
+      button.addEventListener('click',()=>{
+        filterHost.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));
+        button.classList.add('active');
+        renderProducts(c.key);
+      });
+      filterHost.appendChild(button);
+    });
+  }
+
+  const pdfSelects=document.querySelectorAll('.pdf-preview-category');
+  pdfSelects.forEach(select=>{
+    const selected=select.value;
+    select.innerHTML=categories.map(c=>
+      `<option value="${escapeHtml(c.key)}">${escapeHtml(c.name)}</option>`
+    ).join('');
+    if(categories.some(c=>c.key===selected))select.value=selected;
   });
+  renderCategoriesAdmin();
+}
+
+function renderCategoriesAdmin(){
+  const host=$('#categoriesAdminList');
+  if(!host)return;
+  host.innerHTML=categories.map(c=>`
+    <div class="order-card" style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px">
+      <b>${escapeHtml(c.emoji||'📦')} ${escapeHtml(c.name)}</b>
+      <span style="display:flex;gap:8px">
+        <button type="button" data-edit-category="${escapeHtml(c.key)}">تعديل</button>
+        <button type="button" data-delete-category="${escapeHtml(c.key)}">حذف</button>
+      </span>
+    </div>`).join('') || '<p class="muted">لا توجد أقسام.</p>';
+
+  host.querySelectorAll('[data-edit-category]').forEach(button=>{
+    button.onclick=()=>editCategory(button.dataset.editCategory);
+  });
+  host.querySelectorAll('[data-delete-category]').forEach(button=>{
+    button.onclick=()=>removeCategory(button.dataset.deleteCategory);
+  });
+}
+
+async function saveCategory(event){
+  event.preventDefault();
+  const name=$('#categoryName').value.trim();
+  const emoji=$('#categoryEmoji').value.trim()||'📦';
+  const key=categorySlug(name);
+  if(!name||!key){toast('اكتب اسم قسم صالح');return;}
+  if(categories.some(c=>c.key===key)){toast('القسم موجود بالفعل');return;}
+  const item={key,name,emoji};
+  try{
+    if(connected){
+      await setDoc(doc(db,'categories',key),{...item,createdAt:serverTimestamp()});
+      item.id=key;
+    }else{
+      item.id=key;
+    }
+    categories.push(item);
+    $('#categoryForm').reset();
+    $('#categoryEmoji').value='📦';
+    renderCategoryControls();
+    toast('تمت إضافة القسم');
+  }catch(error){
+    console.error(error);
+    toast('تعذر حفظ القسم. راجع صلاحيات Firestore.');
+  }
+}
+
+async function editCategory(key){
+  const item=categories.find(c=>c.key===key);
+  if(!item)return;
+  const name=prompt('اكتب الاسم الجديد للقسم:',item.name);
+  if(name===null)return;
+  const clean=name.trim();
+  if(!clean){toast('اسم القسم لا يمكن أن يكون فارغاً');return;}
+  const emoji=prompt('اكتب الرمز التعبيري للقسم:',item.emoji||'📦');
+  if(emoji===null)return;
+  try{
+    if(connected)await updateDoc(doc(db,'categories',item.id||item.key),{name:clean,emoji:emoji.trim()||'📦'});
+    item.name=clean;item.emoji=emoji.trim()||'📦';
+    renderCategoryControls();
+    toast('تم تعديل القسم');
+  }catch(error){
+    console.error(error);
+    toast('تعذر تعديل القسم');
+  }
+}
+
+async function removeCategory(key){
+  const item=categories.find(c=>c.key===key);
+  if(!item)return;
+  if(products.some(p=>p.category===key)){
+    toast('لا يمكن حذف قسم يحتوي على منتجات. انقل منتجاته لقسم آخر أولاً.');
+    return;
+  }
+  if(!confirm(`هل تريد حذف قسم "${item.name}"؟`))return;
+  try{
+    if(connected)await deleteDoc(doc(db,'categories',item.id||item.key));
+    categories=categories.filter(c=>c.key!==key);
+    renderCategoryControls();
+    toast('تم حذف القسم');
+  }catch(error){
+    console.error(error);
+    toast('تعذر حذف القسم');
+  }
 }
 
 // Products Admin
@@ -721,11 +959,7 @@ function renderPdfPreview(){
       </td>
       <td>
         <select class="pdf-preview-category" data-pdf-category="${i}">
-          <option value="cold" ${p.category==='cold'?'selected':''}>مشروبات باردة</option>
-          <option value="hot">مشروبات ساخنة</option>
-          <option value="juice">عصائر</option>
-          <option value="snack">سناكس</option>
-          <option value="market">ماركت</option>
+          ${categories.map(c=>`<option value="${escapeHtml(c.key)}" ${p.category===c.key?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
         </select>
       </td>
       <td>
