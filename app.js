@@ -2,6 +2,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import { getFirestore, collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js';
 import { firebaseConfig, defaultWhatsAppNumber } from './firebase-config.js';
 
 // Remove ChatGPT tracking parameter from URL
@@ -35,7 +36,7 @@ const demoProducts = [
 const $ = s => document.querySelector(s);
 const money = n => `${Number(n||0).toLocaleString('en-US')} EGP`;
 
-let app, auth, db, connected=false, currentUser=null;
+let app, auth, db, storage, connected=false, currentUser=null;
 let products=[...demoProducts];
 let cart=JSON.parse(localStorage.getItem('zetaCart')||'[]');
 let orders=[];
@@ -63,6 +64,7 @@ try {
     app=initializeApp(firebaseConfig);
     auth=getAuth(app);
     db=getFirestore(app);
+    storage=getStorage(app);
     connected=true;
 
     onAuthStateChanged(auth,u=>{
@@ -551,7 +553,7 @@ function ensureCategoryAdminUI(){
           <button class="btn gold" type="submit">إضافة قسم</button>
         </form>
       </div>
-      <div id="categoriesAdminList" class="admin-panel admin-list-panel"></div>`;
+      <div id="categoriesAdminList" class="admin-panel"></div>`;
     $('#dashboard').appendChild(panel);
     $('#categoryForm').addEventListener('submit',saveCategory);
   }
@@ -622,15 +624,12 @@ function renderCategoriesAdmin(){
   const host=$('#categoriesAdminList');
   if(!host)return;
   host.innerHTML=categories.map(c=>`
-    <div class="admin-list-row">
-      <div class="admin-list-info">
-        <span class="admin-list-icon">${escapeHtml(c.emoji||'📦')}</span>
-        <div><b>${escapeHtml(c.name)}</b><small>قسم في المنيو</small></div>
-      </div>
-      <div class="admin-list-actions">
+    <div class="order-card" style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px">
+      <b>${escapeHtml(c.emoji||'📦')} ${escapeHtml(c.name)}</b>
+      <span style="display:flex;gap:8px">
         <button type="button" data-edit-category="${escapeHtml(c.key)}">تعديل</button>
         <button type="button" data-delete-category="${escapeHtml(c.key)}">حذف</button>
-      </div>
+      </span>
     </div>`).join('') || '<p class="muted">لا توجد أقسام.</p>';
 
   host.querySelectorAll('[data-edit-category]').forEach(button=>{
@@ -844,14 +843,14 @@ function ensureHeroAdminUI(){
     const panel=document.createElement('section');
     panel.id='heroSlidesAdminPanel';panel.className='admin-tab hidden';
     panel.innerHTML=`<div class="panel-title"><h3>إدارة السلايدر الرئيسي</h3><button class="btn gold" id="addHeroSlide">+ إضافة شريحة</button></div>
-    <div class="admin-panel admin-list-panel"><p class="muted">تقدر تعدّل محتوى كل شريحة وتضيف رابط صورة مستضافة خارجيًا. لا يحتاج الموقع إلى Firebase Storage.</p><div id="heroSlidesAdminList"></div></div>
+    <div class="admin-panel"><p class="muted">تقدر تعدّل العنوان والوصف والصورة والزر، وترفع الصورة من جهازك مباشرة إلى Firebase Storage.</p><div id="heroSlidesAdminList"></div></div>
     <div class="admin-panel hero-edit-panel hidden" id="heroSlideEditor"><h3 id="heroEditorTitle">إضافة شريحة</h3>
     <form id="heroSlideForm" class="hero-admin-form">
       <input type="hidden" id="heroSlideId">
       <label>العنوان<input id="heroTitle" required maxlength="90"></label>
       <label>النص الصغير<input id="heroEyebrow" maxlength="70"></label>
       <label>الوصف<textarea id="heroDescription" rows="3" maxlength="240"></textarea></label>
-      <label class="hero-image-field">رابط صورة الشريحة<input id="heroImageUrl" type="url" placeholder="https://example.com/image.jpg"><small class="muted">ارفع الصورة على خدمة استضافة صور، ثم الصق الرابط المباشر هنا.</small></label>
+      <label>صورة الشريحة<input id="heroImageFile" type="file" accept="image/*"><small class="muted">يفضل صورة أفقية، وحجم أقل من 2MB.</small></label>
       <img id="heroImagePreview" class="hero-admin-preview hidden" alt="معاينة صورة الشريحة">
       <label>نص الشارة الجانبية<input id="heroBadge" maxlength="60"></label>
       <label>نص الزر<input id="heroButtonText" maxlength="35"></label>
@@ -864,24 +863,15 @@ function ensureHeroAdminUI(){
     $('#addHeroSlide').onclick=()=>openHeroEditor();
     $('#cancelHeroEdit').onclick=()=>$('#heroSlideEditor').classList.add('hidden');
     $('#heroSlideForm').onsubmit=saveHeroSlide;
-    $('#heroImageUrl').addEventListener('input',()=>{
-      const url=$('#heroImageUrl').value.trim();
-      const preview=$('#heroImagePreview');
-      if(/^https?:\\/\\//i.test(url)){preview.src=url;preview.classList.remove('hidden');}
-      else{preview.removeAttribute('src');preview.classList.add('hidden');}
-    });
   }
 }
 
 function renderHeroAdmin(){
   const host=$('#heroSlidesAdminList');if(!host)return;
-  host.innerHTML=heroSlides.map(slide=>`<div class="admin-list-row">
-    <div class="admin-list-info">
-      ${slide.imageUrl?`<img class="admin-list-thumb" src="${escapeHtml(slide.imageUrl)}" alt="">`:'<span class="admin-list-icon">🖼️</span>'}
-      <div><b>${escapeHtml(slide.title||'شريحة بدون عنوان')}</b><small>الترتيب: ${slide.order||1} · ${slide.active===false?'مخفية':'ظاهرة'}</small></div>
-    </div>
-    <div class="admin-list-actions"><button type="button" data-edit-hero="${escapeHtml(slide.id)}">تعديل</button><button type="button" data-delete-hero="${escapeHtml(slide.id)}">حذف</button></div>
-  </div>`).join('')||'<p class="muted">لا توجد شرائح. اضغط إضافة شريحة لإنشاء واحدة.</p>';
+  host.innerHTML=heroSlides.map(slide=>`<div class="hero-admin-row">
+    <div>${slide.imageUrl?`<img src="${escapeHtml(slide.imageUrl)}" alt="">`:'<span class="hero-admin-placeholder">🖼️</span>'}
+    <div><b>${escapeHtml(slide.title||'شريحة بدون عنوان')}</b><small>الترتيب: ${slide.order||1} · ${slide.active===false?'مخفية':'ظاهرة'}</small></div></div>
+    <div class="hero-admin-actions"><button type="button" data-edit-hero="${escapeHtml(slide.id)}">تعديل</button><button type="button" data-delete-hero="${escapeHtml(slide.id)}">حذف</button></div></div>`).join('')||'<p class="muted">لا توجد شرائح. اضغط إضافة شريحة لإنشاء واحدة.</p>';
   host.querySelectorAll('[data-edit-hero]').forEach(b=>b.onclick=()=>openHeroEditor(b.dataset.editHero));
   host.querySelectorAll('[data-delete-hero]').forEach(b=>b.onclick=()=>removeHeroSlide(b.dataset.deleteHero));
 }
@@ -900,7 +890,6 @@ function openHeroEditor(id=''){
   $('#heroButtonLink').value=slide?.buttonLink||'#menu';
   $('#heroOrder').value=slide?.order||heroSlides.length+1;
   $('#heroActive').checked=slide?.active!==false;
-  $('#heroImageUrl').value=slide?.imageUrl||'';
   const preview=$('#heroImagePreview');
   if(slide?.imageUrl){preview.src=slide.imageUrl;preview.classList.remove('hidden');}
   else{preview.removeAttribute('src');preview.classList.add('hidden');}
@@ -912,19 +901,23 @@ async function saveHeroSlide(event){
   if(!connected||!currentUser){toast('سجّل الدخول إلى Firebase أولاً');return;}
   const id=$('#heroSlideId').value;
   const old=heroSlides.find(x=>x.id===id);
-  const imageUrl=$('#heroImageUrl').value.trim();
-  if(imageUrl){
-    try{
-      const parsed=new URL(imageUrl);
-      if(!['http:','https:'].includes(parsed.protocol))throw new Error('Invalid image URL');
-    }catch(error){toast('اكتب رابط صورة صحيح يبدأ بـ https://');return;}
-  }
+  const file=$('#heroImageFile').files?.[0];
+  let imageUrl=old?.imageUrl||'';
+  let imagePath=old?.imagePath||'';
   try{
+    if(file){
+      if(!file.type.startsWith('image/')){toast('اختار ملف صورة صالح');return;}
+      if(file.size>2*1024*1024){toast('حجم الصورة أكبر من 2MB');return;}
+      const path=`heroSlides/${id||'new-'+Date.now()}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+      const fileRef=storageRef(storage,path);
+      await uploadBytes(fileRef,file,{contentType:file.type});
+      imageUrl=await getDownloadURL(fileRef);imagePath=path;
+    }
     const data={
       title:$('#heroTitle').value.trim(),
       eyebrow:$('#heroEyebrow').value.trim(),
       description:$('#heroDescription').value.trim(),
-      imageUrl,
+      imageUrl,imagePath,
       badgeText:$('#heroBadge').value.trim(),
       buttonText:$('#heroButtonText').value.trim(),
       buttonLink:$('#heroButtonLink').value.trim()||'#menu',
@@ -935,15 +928,16 @@ async function saveHeroSlide(event){
     let savedId=id;
     if(id)await updateDoc(doc(db,'heroSlides',id),data);
     else{const ref=await addDoc(collection(db,'heroSlides'),{...data,createdAt:serverTimestamp()});savedId=ref.id;data.id=savedId;}
+    if(old?.imagePath&&file&&old.imagePath!==imagePath){try{await deleteObject(storageRef(storage,old.imagePath));}catch(e){console.warn('Old hero image cleanup:',e);}}
     if(!heroSlidesInitialized){
       await setDoc(doc(db,'heroSlidesMeta','state'),{initialized:true,updatedAt:serverTimestamp()});
       heroSlidesInitialized=true;
     }
     await loadHeroSlides();renderHeroAdmin();
     $('#heroSlideEditor').classList.add('hidden');
-    toast('تم حفظ الشريحة بنجاح');
+    toast('تم حفظ الشريحة ورفع الصورة');
   }catch(error){
-    console.error(error);toast('تعذر حفظ الشريحة. راجع صلاحيات Firestore.');
+    console.error(error);toast('تعذر حفظ الشريحة. راجع Firestore وStorage Rules.');
   }
 }
 
@@ -953,13 +947,14 @@ async function removeHeroSlide(id){
   try{
     if(connected){
       await deleteDoc(doc(db,'heroSlides',id));
+      if(slide.imagePath){try{await deleteObject(storageRef(storage,slide.imagePath));}catch(e){console.warn('Storage image delete:',e);}}
       await setDoc(doc(db,'heroSlidesMeta','state'),{initialized:true,updatedAt:serverTimestamp()});
       heroSlidesInitialized=true;
     }
     heroSlides=heroSlides.filter(x=>x.id!==id);
     activeHeroIndex=0;renderHeroSlider();renderHeroAdmin();restartHeroTimer();
     toast('تم حذف الشريحة');
-  }catch(error){console.error(error);toast('تعذر حذف الشريحة. راجع صلاحيات Firestore.');}
+  }catch(error){console.error(error);toast('تعذر حذف الشريحة. راجع الصلاحيات.');}
 }
 
 // Products Admin
