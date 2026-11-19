@@ -867,7 +867,7 @@ function ensureHeroAdminUI(){
     $('#heroImageUrl').addEventListener('input',()=>{
       const url=$('#heroImageUrl').value.trim();
       const preview=$('#heroImagePreview');
-if(/^https?:\/\//i.test(url)){preview.src=url;preview.classList.remove('hidden');}
+      if(/^https?:\/\//i.test(url)){preview.src=url;preview.classList.remove('hidden');}
       else{preview.removeAttribute('src');preview.classList.add('hidden');}
     });
   }
