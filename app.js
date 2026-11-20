@@ -37,7 +37,7 @@ const $ = s => document.querySelector(s);
 const money = n => `${Number(n||0).toLocaleString('en-US')} EGP`;
 
 let app, auth, db, connected=false, currentUser=null;
-let products=[...demoProducts];
+let products=[];
 let cart=JSON.parse(localStorage.getItem('zetaCart')||'[]');
 let orders=[];
 let categories=[
