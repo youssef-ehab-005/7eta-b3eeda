@@ -19,20 +19,6 @@ import { firebaseConfig, defaultWhatsAppNumber } from './firebase-config.js';
   }
 })();
 
-
-const demoProducts = [
-  {id:'d1',name:'Oreo Frappe',price:75,category:'cold',emoji:'🥤',description:'قهوة باردة مع الأوريو والكريمة',featured:true},
-  {id:'d2',name:'Iced Spanish Latte',price:70,category:'cold',emoji:'🧋',description:'إسبانيش لاتيه مثلج'},
-  {id:'d3',name:'Mango Smoothie',price:65,category:'juice',emoji:'🥭',description:'مانجو فريش بطعم غني'},
-  {id:'d4',name:'Strawberry Milkshake',price:60,category:'cold',emoji:'🍓',description:'ميلك شيك فراولة'},
-  {id:'d5',name:'Caramel Macchiato',price:70,category:'hot',emoji:'☕',description:'قهوة بالكريمة والكراميل'},
-  {id:'d6',name:'Fresh Orange',price:45,category:'juice',emoji:'🍊',description:'عصير برتقال فريش'},
-  {id:'d7',name:'French Fries',price:35,category:'snack',emoji:'🍟',description:'بطاطس مقرمشة'},
-  {id:'d8',name:'Classic Cappuccino',price:55,category:'hot',emoji:'☕',description:'كابتشينو برغوة الحليب'},
-  {id:'d9',name:'Water Bottle',price:10,category:'market',emoji:'💧',description:'مياه معدنية'},
-  {id:'d10',name:'Chocolate Bar',price:25,category:'market',emoji:'🍫',description:'شوكولاتة'}
-];
-
 const $ = s => document.querySelector(s);
 const money = n => `${Number(n||0).toLocaleString('en-US')} EGP`;
 
