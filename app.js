@@ -475,23 +475,25 @@ function categorySlug(value){
 }
 
 async function loadCategories(){
-  if(!connected){ renderCategoryControls(); return; }
+  if(!connected){
+    categories=[];
+    renderCategoryControls();
+    return;
+  }
+
   try{
-    const snap=await getDocs(collection(db,'categories'));
-    if(!snap.empty){
-      categories=snap.docs.map(d=>({id:d.id,...d.data()}));
-    }else{
-      // Keep the existing category keys working and seed the initial list once.
-      for(const item of categories){
-        await setDoc(doc(db,'categories',item.key),{
-          key:item.key,name:item.name,emoji:item.emoji,createdAt:serverTimestamp()
-        });
-      }
-    }
+    const snap = await getDocs(collection(db,'categories'));
+
+    categories = snap.docs.map(d => ({
+      id: d.id,
+      ...d.data()
+    }));
+
   }catch(error){
     console.error('Categories:',error);
     toast('تعذر تحميل الأقسام. راجع صلاحيات categories في Firestore.');
   }
+
   renderCategoryControls();
 }
 
