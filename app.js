@@ -4,11 +4,11 @@ import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from
 import { getFirestore, collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig, defaultWhatsAppNumber } from './firebase-config.js';
 
-// Remove ChatGPT tracking parameter from URL
+// Remove  tracking parameter from URL
 (() => {
   const url = new URL(window.location.href);
 
-  if (url.searchParams.get('utm_source') === 'chatgpt.com') {
+  if  {
     url.searchParams.delete('utm_source');
 
     window.history.replaceState(
