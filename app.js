@@ -4,11 +4,11 @@ import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from
 import { getFirestore, collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig, defaultWhatsAppNumber } from './firebase-config.js';
 
-// Remove  tracking parameter from URL
+// Remove tracking parameter from URL
 (() => {
   const url = new URL(window.location.href);
 
-  if  {
+  if (url.searchParams.has('utm_source')) {
     url.searchParams.delete('utm_source');
 
     window.history.replaceState(
@@ -18,6 +18,7 @@ import { firebaseConfig, defaultWhatsAppNumber } from './firebase-config.js';
     );
   }
 })();
+
 
 const demoProducts = [
   {id:'d1',name:'Oreo Frappe',price:75,category:'cold',emoji:'🥤',description:'قهوة باردة مع الأوريو والكريمة',featured:true},
