@@ -26,13 +26,7 @@ let app, auth, db, connected=false, currentUser=null;
 let products=[];
 let cart=JSON.parse(localStorage.getItem('zetaCart')||'[]');
 let orders=[];
-let categories=[
-  {id:'cold',key:'cold',name:'مشروبات باردة',emoji:'🥤'},
-  {id:'hot',key:'hot',name:'مشروبات ساخنة',emoji:'☕'},
-  {id:'juice',key:'juice',name:'عصائر',emoji:'🥭'},
-  {id:'snack',key:'snack',name:'سناكس',emoji:'🍟'},
-  {id:'market',key:'market',name:'ماركت',emoji:'🛒'}
-];
+let categories=[];
 let heroSlides=[];
 let activeHeroIndex=0;
 let heroTimer=null;
