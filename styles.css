@@ -77,3 +77,15 @@
   .admin-list-actions button{padding:7px 9px;font-size:11px}
   #categoriesAdminPanel .panel-title,#heroSlidesAdminPanel .panel-title{align-items:flex-start;gap:10px}
 }
+
+/* Order card details layout */
+.order-card{display:grid;grid-template-columns:minmax(120px,1fr) minmax(150px,1.1fr) minmax(220px,2fr) auto auto;align-items:start;gap:16px;padding:18px 14px}
+.order-customer,.order-location,.order-items{min-width:0;display:flex;flex-direction:column;gap:5px}
+.order-customer>b,.order-location>b,.order-items>b{color:var(--gold2);font-size:13px}
+.order-item-row{padding:5px 0;border-bottom:1px solid #34271e}
+.order-item-row>b{display:block;color:#f7f1e9;font-size:12px}
+.order-item-row small,.order-location small,.order-customer small{display:block;color:#a89988;white-space:normal}
+.order-total{color:var(--gold2);font-size:12px;margin-top:5px}
+.order-card select{min-width:105px}
+@media(max-width:900px){.order-card{grid-template-columns:1fr 1fr}.order-items{grid-column:1/-1}}
+@media(max-width:560px){.order-card{grid-template-columns:1fr}.order-items{grid-column:auto}}

@@ -27,10 +27,6 @@ let products=[];
 let cart=JSON.parse(localStorage.getItem('zetaCart')||'[]');
 let orders=[];
 let unsubscribeOrders = null;
-let ordersListenerInitialized = false;
-let newOrderCount = 0;
-let orderAudioContext = null;
-let orderAudioUnlocked = false;
 let categories=[];
 let heroSlides=[];
 let activeHeroIndex=0;
@@ -226,6 +222,7 @@ $('#checkoutForm').addEventListener('submit',async e=>{
   const name=$('#customerName').value.trim();
   const phone=$('#customerPhone').value.trim();
   const address=$('#customerAddress').value.trim();
+  const tableNumber=$('#customerTable').value.trim();
   const notes=$('#orderNotes').value.trim();
 
   const total=cart.reduce((a,x)=>a+x.qty*x.price,0);
@@ -234,8 +231,13 @@ $('#checkoutForm').addEventListener('submit',async e=>{
     customerName:name,
     phone,
     address,
+    tableNumber,
     notes,
-    items:cart.map(({id,name,price,qty})=>({id,name,price,qty})),
+    items:cart.map(({id,name,price,qty})=>{
+      const product=products.find(p=>p.id===id);
+      const category=categories.find(c=>c.key===product?.category);
+      return {id,name,price,qty,categoryKey:product?.category||'',categoryName:category?.name||product?.category||'غير محدد'};
+    }),
     total,
     status:'new',
     createdAt:connected?serverTimestamp():new Date().toISOString()
@@ -322,7 +324,6 @@ function showDashboard(){
   $('#adminLogin').classList.add('hidden');
   $('#dashboard').classList.remove('hidden');
 
-  ensureOrderNotificationUI();
   ensureCategoryAdminUI();
   ensureHeroAdminUI();
   initializeHeroSlidesIfNeeded();
@@ -373,143 +374,10 @@ document.querySelectorAll('.side-tab').forEach(b=>{
     document.querySelectorAll('.admin-tab').forEach(x=>x.classList.add('hidden'));
     $('#tab-'+b.dataset.tab).classList.remove('hidden');
 
-    if(b.dataset.tab==='orders'){
-      newOrderCount=0;
-      updateNewOrderBadge();
-      renderOrders();
-    }
+    if(b.dataset.tab==='orders')renderOrders();
     if(b.dataset.tab==='products')renderAdminProducts();
   };
 });
-
-// Order notifications (in-dashboard + desktop)
-function ensureOrderNotificationUI(){
-  if($('#orderAlertBar')) return;
-
-  const style=document.createElement('style');
-  style.id='orderAlertStyles';
-  style.textContent=`
-    #orderAlertBar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 14px;margin:0 0 16px;background:#fff8e8;border:1px solid #ead7aa;border-radius:14px}
-    #orderAlertBar button{border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:700}
-    #openNewOrders{background:#b88736;color:#fff}
-    #enableDesktopNotifications{background:#26352e;color:#fff}
-    #newOrderCount{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;margin-inline-start:6px;padding:0 6px;border-radius:20px;background:#c33;color:#fff;font-size:12px}
-    #orderAlertStatus{font-size:13px;color:#5b5548}
-  `;
-  document.head.appendChild(style);
-
-  const bar=document.createElement('div');
-  bar.id='orderAlertBar';
-  bar.innerHTML=`
-    <button type="button" id="openNewOrders">الطلبات الجديدة <span id="newOrderCount">0</span></button>
-    <button type="button" id="enableDesktopNotifications">تفعيل إشعارات سطح المكتب</button>
-    <span id="orderAlertStatus">فعّل إشعارات سطح المكتب لاستقبال التنبيهات عند فتح تبويب آخر.</span>
-  `;
-  const main=$('.admin-main');
-  if(main) main.insertBefore(bar,main.firstChild);
-
-  $('#openNewOrders').onclick=()=>{
-    newOrderCount=0;
-    updateNewOrderBadge();
-    const tab=document.querySelector('.side-tab[data-tab="orders"]');
-    if(tab) tab.click();
-  };
-
-  $('#enableDesktopNotifications').onclick=async()=>{
-    if(!('Notification' in window)){
-      $('#orderAlertStatus').textContent='المتصفح لا يدعم إشعارات سطح المكتب.';
-      return;
-    }
-    try{
-      const permission=await Notification.requestPermission();
-      $('#orderAlertStatus').textContent=permission==='granted'
-        ? 'تم تفعيل إشعارات سطح المكتب.'
-        : 'لم يتم السماح بالإشعارات. غيّر الإذن من إعدادات المتصفح.';
-      $('#enableDesktopNotifications').textContent=permission==='granted'
-        ? 'إشعارات سطح المكتب مفعّلة'
-        : 'إعادة تفعيل الإشعارات';
-    }catch(error){
-      console.error('Notification permission:',error);
-      $('#orderAlertStatus').textContent='تعذر طلب إذن الإشعارات من المتصفح.';
-    }
-  };
-
-  if('Notification' in window && Notification.permission==='granted'){
-    $('#enableDesktopNotifications').textContent='إشعارات سطح المكتب مفعّلة';
-    $('#orderAlertStatus').textContent='إشعارات سطح المكتب مفعّلة.';
-  }
-}
-
-function updateNewOrderBadge(){
-  const badge=$('#newOrderCount');
-  if(badge) badge.textContent=String(newOrderCount);
-}
-
-// Browsers require a user gesture before Web Audio can play sound.
-async function unlockOrderAudio(){
-  try{
-    const AudioContextClass=window.AudioContext||window.webkitAudioContext;
-    if(!AudioContextClass) return;
-    if(!orderAudioContext) orderAudioContext=new AudioContextClass();
-    if(orderAudioContext.state==='suspended') await orderAudioContext.resume();
-    orderAudioUnlocked=orderAudioContext.state==='running';
-  }catch(error){
-    console.warn('Could not enable order alert audio:',error);
-  }
-}
-
-// The admin's first click/tap/key press unlocks audio for later live order events.
-window.addEventListener('pointerdown',unlockOrderAudio,{passive:true});
-window.addEventListener('keydown',unlockOrderAudio);
-
-function playNewOrderSound(){
-  try{
-    if(!orderAudioContext || !orderAudioUnlocked || orderAudioContext.state!=='running'){
-      console.warn('Order alert sound is not enabled yet. Click or tap the admin page first.');
-      return;
-    }
-    const context=orderAudioContext;
-    const oscillator=context.createOscillator();
-    const gain=context.createGain();
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.type='sine';
-    oscillator.frequency.setValueAtTime(880,context.currentTime);
-    oscillator.frequency.setValueAtTime(660,context.currentTime+0.16);
-    gain.gain.setValueAtTime(0.0001,context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.22,context.currentTime+0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime+0.48);
-    oscillator.start();
-    oscillator.stop(context.currentTime+0.5);
-  }catch(error){
-    console.warn('Order notification sound:',error);
-  }
-}
-
-function notifyNewOrder(order){
-  newOrderCount++;
-  updateNewOrderBadge();
-  toast(`طلب جديد من ${order.customerName||'عميل'} — ${money(order.total)}`);
-  playNewOrderSound();
-
-  if('Notification' in window && Notification.permission==='granted'){
-    try{
-      const notification=new Notification('طلب جديد - 7eta b3eeda',{
-        body:`${order.customerName||'عميل'} · ${money(order.total)}\n${order.phone||''}`,
-        tag:`new-order-${order.id}`,
-        renotify:true
-      });
-      notification.onclick=()=>{
-        window.focus();
-        const tab=document.querySelector('.side-tab[data-tab="orders"]');
-        if(tab) tab.click();
-        notification.close();
-      };
-    }catch(error){
-      console.warn('Desktop notification:',error);
-    }
-  }
-}
 
 // Real-time Orders Listener
 function listenToOrders(){
@@ -519,7 +387,6 @@ function listenToOrders(){
     unsubscribeOrders();
     unsubscribeOrders=null;
   }
-  ordersListenerInitialized=false;
 
   const ordersQuery=query(
     collection(db,'orders'),
@@ -527,19 +394,6 @@ function listenToOrders(){
   );
 
   unsubscribeOrders=onSnapshot(ordersQuery,snapshot=>{
-    if(ordersListenerInitialized){
-      snapshot.docChanges().forEach(change=>{
-        if(change.type==='added'){
-          const data=change.doc.data();
-          if(data.status==='new'){
-            notifyNewOrder({id:change.doc.id,...data});
-          }
-        }
-      });
-    }else{
-      ordersListenerInitialized=true;
-    }
-
     orders=snapshot.docs.map(d=>({id:d.id,...d.data()}));
     updateOrdersDashboard();
   },error=>{
@@ -587,11 +441,32 @@ async function loadAdminData(){
 }
 
 function orderHtml(o){
+  const itemsHtml=(o.items||[]).map(item=>{
+    const product=products.find(p=>p.id===item.id);
+    const categoryName=item.categoryName
+      || categories.find(c=>c.key===(item.categoryKey||product?.category))?.name
+      || product?.category
+      || 'غير محدد';
+    return `<div class="order-item-row">
+      <b>${escapeHtml(item.name||'منتج')}</b>
+      <small>القسم: ${escapeHtml(categoryName)} · الكمية: ${Number(item.qty||1)} · ${money(Number(item.price||0)*Number(item.qty||1))}</small>
+    </div>`;
+  }).join('') || '<small class="muted">تفاصيل المنتجات غير متاحة لهذا الطلب القديم.</small>';
+
   return `<div class="order-card">
-    <div>
+    <div class="order-customer">
       <b>${escapeHtml(o.customerName||'عميل')}</b>
-      <small>${escapeHtml(o.phone||'')} · ${money(o.total)}</small>
-      <small>${escapeHtml(o.address||'')}</small>
+      <small>📞 ${escapeHtml(o.phone||'غير مسجل')}</small>
+    </div>
+    <div class="order-location">
+      <b>بيانات المكان</b>
+      <small>رقم الترابيزة: ${escapeHtml(o.tableNumber||'—')}</small>
+      <small>العنوان: ${escapeHtml(o.address||'—')}</small>
+    </div>
+    <div class="order-items">
+      <b>الطلب (${(o.items||[]).length} أصناف)</b>
+      ${itemsHtml}
+      <strong class="order-total">الإجمالي: ${money(o.total)}</strong>
     </div>
     <select data-status="${escapeHtml(o.id)}">
       <option value="new" ${o.status==='new'?'selected':''}>جديد</option>
