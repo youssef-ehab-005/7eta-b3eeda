@@ -27,6 +27,8 @@ let products=[];
 let cart=JSON.parse(localStorage.getItem('zetaCart')||'[]');
 let orders=[];
 let unsubscribeOrders = null;
+let ordersListenerInitialized = false;
+let newOrderCount = 0;
 let categories=[];
 let heroSlides=[];
 let activeHeroIndex=0;
@@ -318,6 +320,7 @@ function showDashboard(){
   $('#adminLogin').classList.add('hidden');
   $('#dashboard').classList.remove('hidden');
 
+  ensureOrderNotificationUI();
   ensureCategoryAdminUI();
   ensureHeroAdminUI();
   initializeHeroSlidesIfNeeded();
@@ -368,10 +371,125 @@ document.querySelectorAll('.side-tab').forEach(b=>{
     document.querySelectorAll('.admin-tab').forEach(x=>x.classList.add('hidden'));
     $('#tab-'+b.dataset.tab).classList.remove('hidden');
 
-    if(b.dataset.tab==='orders')renderOrders();
+    if(b.dataset.tab==='orders'){
+      newOrderCount=0;
+      updateNewOrderBadge();
+      renderOrders();
+    }
     if(b.dataset.tab==='products')renderAdminProducts();
   };
 });
+
+// Order notifications (in-dashboard + desktop)
+function ensureOrderNotificationUI(){
+  if($('#orderAlertBar')) return;
+
+  const style=document.createElement('style');
+  style.id='orderAlertStyles';
+  style.textContent=`
+    #orderAlertBar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 14px;margin:0 0 16px;background:#fff8e8;border:1px solid #ead7aa;border-radius:14px}
+    #orderAlertBar button{border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:700}
+    #openNewOrders{background:#b88736;color:#fff}
+    #enableDesktopNotifications{background:#26352e;color:#fff}
+    #newOrderCount{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;margin-inline-start:6px;padding:0 6px;border-radius:20px;background:#c33;color:#fff;font-size:12px}
+    #orderAlertStatus{font-size:13px;color:#5b5548}
+  `;
+  document.head.appendChild(style);
+
+  const bar=document.createElement('div');
+  bar.id='orderAlertBar';
+  bar.innerHTML=`
+    <button type="button" id="openNewOrders">الطلبات الجديدة <span id="newOrderCount">0</span></button>
+    <button type="button" id="enableDesktopNotifications">تفعيل إشعارات سطح المكتب</button>
+    <span id="orderAlertStatus">فعّل إشعارات سطح المكتب لاستقبال التنبيهات عند فتح تبويب آخر.</span>
+  `;
+  const main=$('.admin-main');
+  if(main) main.insertBefore(bar,main.firstChild);
+
+  $('#openNewOrders').onclick=()=>{
+    newOrderCount=0;
+    updateNewOrderBadge();
+    const tab=document.querySelector('.side-tab[data-tab="orders"]');
+    if(tab) tab.click();
+  };
+
+  $('#enableDesktopNotifications').onclick=async()=>{
+    if(!('Notification' in window)){
+      $('#orderAlertStatus').textContent='المتصفح لا يدعم إشعارات سطح المكتب.';
+      return;
+    }
+    try{
+      const permission=await Notification.requestPermission();
+      $('#orderAlertStatus').textContent=permission==='granted'
+        ? 'تم تفعيل إشعارات سطح المكتب.'
+        : 'لم يتم السماح بالإشعارات. غيّر الإذن من إعدادات المتصفح.';
+      $('#enableDesktopNotifications').textContent=permission==='granted'
+        ? 'إشعارات سطح المكتب مفعّلة'
+        : 'إعادة تفعيل الإشعارات';
+    }catch(error){
+      console.error('Notification permission:',error);
+      $('#orderAlertStatus').textContent='تعذر طلب إذن الإشعارات من المتصفح.';
+    }
+  };
+
+  if('Notification' in window && Notification.permission==='granted'){
+    $('#enableDesktopNotifications').textContent='إشعارات سطح المكتب مفعّلة';
+    $('#orderAlertStatus').textContent='إشعارات سطح المكتب مفعّلة.';
+  }
+}
+
+function updateNewOrderBadge(){
+  const badge=$('#newOrderCount');
+  if(badge) badge.textContent=String(newOrderCount);
+}
+
+function playNewOrderSound(){
+  try{
+    const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+    if(!AudioContextClass) return;
+    const context=new AudioContextClass();
+    const oscillator=context.createOscillator();
+    const gain=context.createGain();
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.type='sine';
+    oscillator.frequency.setValueAtTime(880,context.currentTime);
+    oscillator.frequency.setValueAtTime(660,context.currentTime+0.16);
+    gain.gain.setValueAtTime(0.0001,context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18,context.currentTime+0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime+0.38);
+    oscillator.start();
+    oscillator.stop(context.currentTime+0.4);
+    oscillator.onended=()=>context.close();
+  }catch(error){
+    console.warn('Order notification sound:',error);
+  }
+}
+
+function notifyNewOrder(order){
+  newOrderCount++;
+  updateNewOrderBadge();
+  toast(`طلب جديد من ${order.customerName||'عميل'} — ${money(order.total)}`);
+  playNewOrderSound();
+
+  if('Notification' in window && Notification.permission==='granted'){
+    try{
+      const notification=new Notification('طلب جديد - 7eta b3eeda',{
+        body:`${order.customerName||'عميل'} · ${money(order.total)}\n${order.phone||''}`,
+        tag:`new-order-${order.id}`,
+        renotify:true
+      });
+      notification.onclick=()=>{
+        window.focus();
+        const tab=document.querySelector('.side-tab[data-tab="orders"]');
+        if(tab) tab.click();
+        notification.close();
+      };
+    }catch(error){
+      console.warn('Desktop notification:',error);
+    }
+  }
+}
 
 // Real-time Orders Listener
 function listenToOrders(){
@@ -381,6 +499,7 @@ function listenToOrders(){
     unsubscribeOrders();
     unsubscribeOrders=null;
   }
+  ordersListenerInitialized=false;
 
   const ordersQuery=query(
     collection(db,'orders'),
@@ -388,6 +507,19 @@ function listenToOrders(){
   );
 
   unsubscribeOrders=onSnapshot(ordersQuery,snapshot=>{
+    if(ordersListenerInitialized){
+      snapshot.docChanges().forEach(change=>{
+        if(change.type==='added'){
+          const data=change.doc.data();
+          if(data.status==='new'){
+            notifyNewOrder({id:change.doc.id,...data});
+          }
+        }
+      });
+    }else{
+      ordersListenerInitialized=true;
+    }
+
     orders=snapshot.docs.map(d=>({id:d.id,...d.data()}));
     updateOrdersDashboard();
   },error=>{
