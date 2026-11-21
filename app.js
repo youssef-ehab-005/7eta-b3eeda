@@ -29,6 +29,8 @@ let orders=[];
 let unsubscribeOrders = null;
 let ordersListenerInitialized = false;
 let newOrderCount = 0;
+let orderAudioContext = null;
+let orderAudioUnlocked = false;
 let categories=[];
 let heroSlides=[];
 let activeHeroIndex=0;
@@ -443,11 +445,30 @@ function updateNewOrderBadge(){
   if(badge) badge.textContent=String(newOrderCount);
 }
 
-function playNewOrderSound(){
+// Browsers require a user gesture before Web Audio can play sound.
+async function unlockOrderAudio(){
   try{
     const AudioContextClass=window.AudioContext||window.webkitAudioContext;
     if(!AudioContextClass) return;
-    const context=new AudioContextClass();
+    if(!orderAudioContext) orderAudioContext=new AudioContextClass();
+    if(orderAudioContext.state==='suspended') await orderAudioContext.resume();
+    orderAudioUnlocked=orderAudioContext.state==='running';
+  }catch(error){
+    console.warn('Could not enable order alert audio:',error);
+  }
+}
+
+// The admin's first click/tap/key press unlocks audio for later live order events.
+window.addEventListener('pointerdown',unlockOrderAudio,{passive:true});
+window.addEventListener('keydown',unlockOrderAudio);
+
+function playNewOrderSound(){
+  try{
+    if(!orderAudioContext || !orderAudioUnlocked || orderAudioContext.state!=='running'){
+      console.warn('Order alert sound is not enabled yet. Click or tap the admin page first.');
+      return;
+    }
+    const context=orderAudioContext;
     const oscillator=context.createOscillator();
     const gain=context.createGain();
     oscillator.connect(gain);
@@ -456,11 +477,10 @@ function playNewOrderSound(){
     oscillator.frequency.setValueAtTime(880,context.currentTime);
     oscillator.frequency.setValueAtTime(660,context.currentTime+0.16);
     gain.gain.setValueAtTime(0.0001,context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.18,context.currentTime+0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime+0.38);
+    gain.gain.exponentialRampToValueAtTime(0.22,context.currentTime+0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime+0.48);
     oscillator.start();
-    oscillator.stop(context.currentTime+0.4);
-    oscillator.onended=()=>context.close();
+    oscillator.stop(context.currentTime+0.5);
   }catch(error){
     console.warn('Order notification sound:',error);
   }
