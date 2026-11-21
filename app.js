@@ -398,6 +398,7 @@ function ensureOrderNotificationUI(){
     #orderAlertBar button{border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:700}
     #openNewOrders{background:#b88736;color:#fff}
     #enableDesktopNotifications{background:#26352e;color:#fff}
+    #enableOrderSound{background:#526b45;color:#fff}
     #newOrderCount{display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;margin-inline-start:6px;padding:0 6px;border-radius:20px;background:#c33;color:#fff;font-size:12px}
     #orderAlertStatus{font-size:13px;color:#5b5548}
   `;
@@ -407,11 +408,14 @@ function ensureOrderNotificationUI(){
   bar.id='orderAlertBar';
   bar.innerHTML=`
     <button type="button" id="openNewOrders">الطلبات الجديدة <span id="newOrderCount">0</span></button>
+    <button type="button" id="enableOrderSound">تفعيل صوت الطلبات</button>
     <button type="button" id="enableDesktopNotifications">تفعيل إشعارات سطح المكتب</button>
-    <span id="orderAlertStatus">اضغط داخل لوحة التحكم لتفعيل الصوت، واسمح بإشعارات سطح المكتب.</span>
+    <span id="orderAlertStatus">فعّل صوت الطلبات من الزر، واسمح بإشعارات سطح المكتب بشكل منفصل.</span>
   `;
   const main=$('.admin-main');
   if(main) main.insertBefore(bar,main.firstChild);
+
+  $('#enableOrderSound').onclick=unlockOrderAudio;
 
   $('#openNewOrders').onclick=()=>{
     newOrderCount=0;
@@ -464,13 +468,10 @@ async function unlockOrderAudio(){
     console.warn('Could not enable order alert audio:',error);
   }
 }
-window.addEventListener('pointerdown',unlockOrderAudio,{passive:true});
-window.addEventListener('keydown',unlockOrderAudio);
 
 function playNewOrderSound(){
   try{
     if(!orderAudioContext || !orderAudioUnlocked || orderAudioContext.state!=='running'){
-      console.warn('Order alert sound is not enabled yet. Click or tap the admin page first.');
       return;
     }
     const context=orderAudioContext;
