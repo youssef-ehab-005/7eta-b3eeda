@@ -26,6 +26,7 @@ let app, auth, db, connected=false, currentUser=null;
 let products=[];
 let cart=JSON.parse(localStorage.getItem('zetaCart')||'[]');
 let orders=[];
+let unsubscribeOrders = null;
 let categories=[];
 let heroSlides=[];
 let activeHeroIndex=0;
@@ -48,7 +49,14 @@ try {
 
     onAuthStateChanged(auth,u=>{
       currentUser=u;
-      if(location.hash==='#admin'&&u) showDashboard();
+      if(u){
+        if(location.hash==='#admin') showDashboard();
+      }else{
+        if(unsubscribeOrders){
+          unsubscribeOrders();
+          unsubscribeOrders=null;
+        }
+      }
     });
   }
 } catch(e) {
@@ -341,6 +349,10 @@ $('#loginForm').onsubmit=async e=>{
 };
 
 $('#logoutBtn').onclick=async()=>{
+  if(unsubscribeOrders){
+    unsubscribeOrders();
+    unsubscribeOrders=null;
+  }
   if(auth)await signOut(auth);
   currentUser=null;
   showLogin();
@@ -361,35 +373,34 @@ document.querySelectorAll('.side-tab').forEach(b=>{
   };
 });
 
-// Load Admin Data
-async function loadAdminData(){
-  if(!currentUser)return;
+// Real-time Orders Listener
+function listenToOrders(){
+  if(!connected || !currentUser) return;
 
-  try{
-    if(connected){
-      const ps=await getDocs(collection(db,'products'));
-      if(!ps.empty)products=ps.docs.map(d=>({id:d.id,...d.data()}));
-
-      const os=await getDocs(query(
-        collection(db,'orders'),
-        orderBy('createdAt','desc')
-      ));
-
-      orders=os.docs.map(d=>({id:d.id,...d.data()}));
-    }else{
-      orders=JSON.parse(localStorage.getItem('zetaOrders')||'[]');
-    }
-  }catch(e){
-    console.error(e);
-    toast('تأكد من إعدادات Firestore والصلاحيات');
+  if(unsubscribeOrders){
+    unsubscribeOrders();
+    unsubscribeOrders=null;
   }
 
-  renderProducts();
-  renderAdminProducts();
+  const ordersQuery=query(
+    collection(db,'orders'),
+    orderBy('createdAt','desc')
+  );
+
+  unsubscribeOrders=onSnapshot(ordersQuery,snapshot=>{
+    orders=snapshot.docs.map(d=>({id:d.id,...d.data()}));
+    updateOrdersDashboard();
+  },error=>{
+    console.error('Live orders error:',error);
+    toast('تعذر تحديث الطلبات تلقائياً');
+  });
+}
+
+// Update Orders Dashboard
+function updateOrdersDashboard(){
   renderOrders();
 
-  const sales=orders.reduce((a,o)=>a+Number(o.total||0),0);
-
+  const sales=orders.reduce((sum,o)=>sum+Number(o.total||0),0);
   $('#statOrders').textContent=orders.length;
   $('#statSales').textContent=money(sales);
   $('#statProducts').textContent=products.length;
@@ -398,6 +409,29 @@ async function loadAdminData(){
     .map(orderHtml).join('')
     ||'<p class="muted">لا توجد طلبات بعد.</p>';
   attachOrderActions($('#recentOrders'));
+}
+
+// Load Admin Data
+async function loadAdminData(){
+  if(!currentUser)return;
+
+  try{
+    if(connected){
+      const ps=await getDocs(collection(db,'products'));
+      products=ps.docs.map(d=>({id:d.id,...d.data()}));
+      listenToOrders();
+    }else{
+      orders=JSON.parse(localStorage.getItem('zetaOrders')||'[]');
+      updateOrdersDashboard();
+    }
+  }catch(error){
+    console.error(error);
+    toast('تأكد من إعدادات Firestore والصلاحيات');
+  }
+
+  renderProducts();
+  renderAdminProducts();
+  $('#statProducts').textContent=products.length;
 }
 
 function orderHtml(o){
